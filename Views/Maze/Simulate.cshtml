@@ -1,0 +1,254 @@
+﻿@{
+    Layout = null; // Or extend from your existing layout
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maze Simulation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+        }
+
+        canvas {
+            border: 2px solid #333;
+            margin-top: 20px;
+        }
+
+        .controls {
+            margin: 20px 0;
+        }
+
+            .controls button {
+                padding: 10px 20px;
+                margin: 5px;
+                border: none;
+                background-color: #007bff;
+                color: #fff;
+                cursor: pointer;
+                border-radius: 5px;
+            }
+
+                .controls button:hover {
+                    background-color: #0056b3;
+                }
+
+        .congratulations-message {
+            margin-top: 20px;
+            font-size: 24px;
+            color: green;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Maze Simulation</h1>
+    <p>Watch Pikachu traverse the maze in real time!</p>
+    <div style="display: flex; flex-direction: row;">
+        <div id="logPanel" style="width: 200px; padding: 10px; background-color: #eef; border-right: 1px solid #ccc; overflow-y: auto; height: 500px;">
+            <h3>Log Panel</h3>
+            <ul id="logList" style="list-style: none; padding: 0; margin: 0;"></ul>
+        </div>
+        <div style="flex: 1;">
+            <!-- Existing content here -->
+            <canvas id="mazeCanvas"></canvas>
+            <div class="controls">
+                <button onclick="increaseSpeed()">Increase Speed</button>
+                <button onclick="decreaseSpeed()">Decrease Speed</button>
+                <a href="@Url.Action("Solve", "Maze")">Solve Maze Again</a>
+            </div>
+            <div class="energy-panel">
+                <p>Current Energy: <span id="energyDisplay">@Model.Energy</span></p>
+            </div>
+            <div id="congratulationsMessage" class="congratulations-message" style="display:none;">
+                Congratulations, you've completed the maze!
+            </div>
+        </div>
+    </div>
+
+
+
+    <script>
+        const grid = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Grid));
+        const pathLog = @Html.Raw(Newtonsoft.Json.JsonConvert.SerializeObject(Model.Path));
+        const canvas = document.getElementById("mazeCanvas");
+        const ctx = canvas.getContext("2d");
+
+        const cellSize = 40; // Size of each cell in pixels
+        const rows = grid.length;
+        const cols = grid[0].length;
+        canvas.width = cols * cellSize;
+        canvas.height = rows * cellSize;
+
+        let speed = 500; // Speed in ms
+        let pikachu = { x: 0, y: 0 };
+
+        let pathIndex = 0;
+        let visitedPositions = new Set();
+        let deadEndPositions = new Set(); // To track dead-end positions
+
+        // Draw the maze
+        function drawMaze() {
+            for (let i = 0; i < rows; i++) {
+                for (let j = 0; j < cols; j++) {
+                    if (grid[i][j] === 0) {
+                        ctx.fillStyle = "#333"; // Wall (dark gray)
+                    } else if (grid[i][j] === 1) {
+                        ctx.fillStyle = "#fff"; // Route (white)
+                    } else if (grid[i][j] === 2) {
+                        ctx.fillStyle = "#4CAF50"; // Start (green)
+                    } else if (grid[i][j] === 3) {
+                        ctx.fillStyle = "#FFD700"; // Exit (yellow)
+                    } else if (grid[i][j] === 4) {
+                        ctx.fillStyle = "#008000"; // Energy Boost (green)
+                    } else if (grid[i][j] === 5) {
+                        ctx.fillStyle = "#000"; // Energy Penalty (black)
+                    }
+
+                    ctx.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+                    ctx.strokeRect(j * cellSize, i * cellSize, cellSize, cellSize);
+
+                    if (grid[i][j] === 4 || grid[i][j] === 5) {
+                        ctx.beginPath();
+                        ctx.arc(j * cellSize + cellSize / 2, i * cellSize + cellSize / 2, cellSize / 4, 0, Math.PI * 2);
+                        ctx.fillStyle = grid[i][j] === 4 ? "#00FF00" : "#FFFFFF";
+                        ctx.fill();
+                    }
+                }
+            }
+
+            deadEndPositions.forEach((pos) => {
+                const [x, y] = pos.split(",").map(Number);
+                ctx.fillStyle = "red";
+                ctx.fillRect(y * cellSize, x * cellSize, cellSize, cellSize);
+            });
+        }
+
+        // Draw Pikachu
+        function drawPikachu(x, y) {
+            ctx.beginPath();
+            ctx.fillStyle = "yellow";
+            ctx.arc(x * cellSize + cellSize / 2, y * cellSize + cellSize / 2, cellSize / 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Animate Pikachu
+        // Update energy display dynamically
+        function updateEnergyDisplay(step) {
+            const energyMatch = step.match(/Energy: (\d+)/);
+            if (energyMatch) {
+                const energy = parseInt(energyMatch[1]);
+                document.getElementById("energyDisplay").textContent = energy;
+            }
+        }
+        function logStep(message) {
+            const logList = document.getElementById("logList");
+            const logItem = document.createElement("li");
+            logItem.textContent = message;
+            logList.appendChild(logItem);
+            logList.scrollTop = logList.scrollHeight; // Auto-scroll to the bottom
+        }
+        function sendSimulationData() {
+            const simulationData = {
+                repeatCount: repeat,
+                shortestPath: Array.from(shortestPath),
+                path: pathLog
+
+            };
+
+            fetch('@Url.Action("SaveSimulationResults", "Maze")', {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(simulationData),
+            })
+                .then(response => {
+                    if (response.ok) {
+                        console.log("Simulation data successfully sent to the server.");
+                    } else {
+                        console.error("Failed to send simulation data.");
+                    }
+                })
+                .catch(error => console.error("Error:", error));
+        }
+
+        // Modify animatePikachu to include energy updates
+        let shortestPath = new Set(); // To track dead-end positions
+        let repeat = 0 ; 
+        function animatePikachu() {
+            if (pathIndex >= pathLog.length) {
+                document.getElementById("congratulationsMessage").style.display = "block"; // Show Congratulations message
+                logStep("Maze complete! Pikachu has reached the exit.");
+
+                // Highlight the solution path in green, excluding dead ends
+                visitedPositions.forEach((pos) => {
+                    if (!deadEndPositions.has(pos)) {
+                        shortestPath.add(pos);
+                        const [x, y] = pos.split(",").map(Number);
+                        ctx.fillStyle = "#00FF00"; // Green for solution path
+                        ctx.fillRect(y * cellSize, x * cellSize, cellSize, cellSize);
+                        ctx.strokeRect(y * cellSize, x * cellSize, cellSize, cellSize); // Retain grid outline
+                    }
+                });
+                sendSimulationData(); // Send the data to the controller
+
+                return; // Stop animation when the path is complete
+            }
+
+            const step = pathLog[pathIndex];
+            logStep(step); // Log the current step to the log panel
+
+            updateEnergyDisplay(step); // Update energy display
+
+            const positionMatch = step.match(/\((\d+),(\d+)(?:-|\))/);
+            const repositionMatch = step.includes("Restarting from start point");
+            const deadEndMatch = step.includes("Marking") && step.includes("dead end");
+
+            if (positionMatch) {
+                const x = parseInt(positionMatch[1]);
+                const y = parseInt(positionMatch[2]);
+                const key = `${x},${y}`;
+
+                if (repositionMatch) {
+                    repeat = repeat +1 ;
+                    visitedPositions.clear(); // Clear visited positions for the reset
+                    drawMaze();
+                }
+
+                if (deadEndMatch) {
+                    deadEndPositions.add(key); // Mark as dead end
+                    ctx.fillStyle = "red";
+                    ctx.fillRect(y * cellSize, x * cellSize, cellSize, cellSize);
+                } else if (!visitedPositions.has(key)) {
+                    drawMaze();
+                    drawPikachu(y, x);
+                    visitedPositions.add(key); // Track visited positions
+                }
+            }
+
+            pathIndex++;
+            setTimeout(animatePikachu, speed);
+        }
+
+
+        // Speed Controls
+        function increaseSpeed() {
+            speed = Math.max(100, speed - 100);
+        }
+
+        function decreaseSpeed() {
+            speed += 100;
+        }
+
+        // Initialize
+        drawMaze();
+        drawPikachu(pikachu.x, pikachu.y);
+        setTimeout(animatePikachu, speed);
+    </script>
+</body>
+</html>
